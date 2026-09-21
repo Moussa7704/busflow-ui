@@ -10,3 +10,30 @@ body {
   background: #f5f6f8;
   color: #1f2430;
 }
+
+/* Cache les titres de section (groupes de menu) quand la sidebar est réduite,
+   pour éviter les libellés tronqués illisibles. */
+.ant-menu-inline-collapsed .ant-menu-item-group-title {
+  display: none;
+}
+
+/* Impression : n'imprime que le contenu marqué .printable-area
+   (ex: la feuille d'embarquement), masque le reste de la page. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-area,
+  .printable-area * {
+    visibility: visible;
+  }
+  .printable-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

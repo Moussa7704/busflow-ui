@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { Table, Button, Tooltip, Popconfirm, Space, message } from "antd";
+import { CheckCircleOutlined, ToolOutlined, StopOutlined, EditOutlined, DeleteOutlined, LoadingOutlined } from "@ant-design/icons";
 import { busesApi, compagniesApi } from "../../api/resources";
 import { useAuth } from "../../context/AuthContext";
 import { can, isSuperAdmin } from "../../permissions";
+import { usePaginatedList } from "../../hooks/usePaginatedList";
 import StatusBadge from "../../components/StatusBadge";
 import Modal from "../../components/Modal";
 
@@ -19,38 +22,38 @@ const BusesPage = () => {
     const { user } = useAuth();
     const manage = can("buses", "manage", user?.role);
 
-    const [buses, setBuses] = useState([]);
+    const { data: buses, loading, error, pagination, reload: load } = usePaginatedList(busesApi.list);
     const [compagnies, setCompagnies] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
 
     const [showForm, setShowForm] = useState(false);
+    const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [formError, setFormError] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    const load = async () => {
-        setLoading(true);
-        setError("");
-        try {
-            const res = await busesApi.list({ limit: 50 });
-            setBuses(res.data);
-        } catch (err) {
-            setError(err.response?.data?.message || "Erreur de chargement des bus.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
-        load();
         if (isSuperAdmin(user?.role)) {
-            compagniesApi.list({ limit: 100 }).then((res) => setCompagnies(res.data)).catch(() => {});
+            compagniesApi.list({ limit: 100 }).then((res) => setCompagnies(res.data.filter((c) => c.status === "ACTIVE"))).catch(() => {});
         }
     }, []);
 
     const openForm = () => {
+        setEditingId(null);
         setForm(emptyForm);
+        setFormError("");
+        setShowForm(true);
+    };
+
+    const openEditForm = (bus) => {
+        setEditingId(bus.id);
+        setForm({
+            compagny_id: bus.compagny_id || "",
+            plate_number: bus.plate_number || "",
+            bus_number: bus.bus_number || "",
+            capacity: bus.capacity || "",
+            type: bus.type || "",
+            status: bus.status || "AVAILABLE"
+        });
         setFormError("");
         setShowForm(true);
     };
@@ -60,15 +63,22 @@ const BusesPage = () => {
         setFormError("");
         setSubmitting(true);
         try {
-            await busesApi.create({
+            const payload = {
                 ...form,
                 compagny_id: form.compagny_id || undefined,
                 capacity: Number(form.capacity)
-            });
+            };
+            if (editingId) {
+                await busesApi.update(editingId, payload);
+                message.success("Bus mis à jour avec succès.");
+            } else {
+                await busesApi.create(payload);
+                message.success("Bus créé avec succès.");
+            }
             setShowForm(false);
             load();
         } catch (err) {
-            setFormError(err.response?.data?.message || "Erreur lors de la création.");
+            setFormError(err.response?.data?.message || "Erreur lors de l'enregistrement.");
         } finally {
             setSubmitting(false);
         }
@@ -77,19 +87,20 @@ const BusesPage = () => {
     const handleStatusChange = async (bus, status) => {
         try {
             await busesApi.changeStatus(bus.id, status);
+            message.success("Statut du bus mis à jour.");
             load();
         } catch (err) {
-            alert(err.response?.data?.message || "Changement de statut impossible.");
+            message.error(err.response?.data?.message || "Changement de statut impossible.");
         }
     };
 
     const handleDelete = async (id) => {
-        if (!confirm("Supprimer ce bus ?")) return;
         try {
             await busesApi.remove(id);
+            message.success("Bus supprimé.");
             load();
         } catch (err) {
-            alert(err.response?.data?.message || "Suppression impossible.");
+            message.error(err.response?.data?.message || "Suppression impossible.");
         }
     };
 
@@ -107,52 +118,85 @@ const BusesPage = () => {
             {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-left">
-                        <tr>
-                            <th className="px-4 py-2 font-medium">Immatriculation</th>
-                            <th className="px-4 py-2 font-medium">N° interne</th>
-                            <th className="px-4 py-2 font-medium">Capacité</th>
-                            <th className="px-4 py-2 font-medium">Type</th>
-                            <th className="px-4 py-2 font-medium">Compagnie</th>
-                            <th className="px-4 py-2 font-medium">Statut</th>
-                            <th className="px-4 py-2 font-medium"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
-                            <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Chargement...</td></tr>
-                        ) : buses.length === 0 ? (
-                            <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Aucun bus</td></tr>
-                        ) : buses.map((b) => (
-                            <tr key={b.id} className="border-t border-slate-100">
-                                <td className="px-4 py-2">{b.plate_number}</td>
-                                <td className="px-4 py-2">{b.bus_number}</td>
-                                <td className="px-4 py-2">{b.capacity}</td>
-                                <td className="px-4 py-2">{b.type || "-"}</td>
-                                <td className="px-4 py-2">{b.Compagny?.name || "-"}</td>
-                                <td className="px-4 py-2"><StatusBadge status={b.status} /></td>
-                                <td className="px-4 py-2 text-right space-x-2">
-                                    {manage && (
-                                        <>
-                                            {b.status !== "AVAILABLE" && (
-                                                <button onClick={() => handleStatusChange(b, "AVAILABLE")} className="text-xs text-emerald-600 hover:underline">Disponible</button>
-                                            )}
-                                            {b.status !== "MAINTENANCE" && (
-                                                <button onClick={() => handleStatusChange(b, "MAINTENANCE")} className="text-xs text-amber-600 hover:underline">Maintenance</button>
-                                            )}
-                                            <button onClick={() => handleDelete(b.id)} className="text-xs text-red-600 hover:underline">Supprimer</button>
-                                        </>
+                <Table
+                    rowKey="id"
+                    loading={loading}
+                    pagination={pagination}
+                    locale={{ emptyText: "Aucun bus" }}
+                    columns={[
+                        { title: "Immatriculation", dataIndex: "plate_number", key: "plate_number" },
+                        { title: "N° interne", dataIndex: "bus_number", key: "bus_number" },
+                        { title: "Capacité", dataIndex: "capacity", key: "capacity" },
+                        { title: "Type", key: "type", render: (_, b) => b.type || "-" },
+                        { title: "Compagnie", key: "compagny", render: (_, b) => b.Compagny?.name || "-" },
+                        {
+                            title: "Statut",
+                            dataIndex: "status",
+                            key: "status",
+                            render: (status) => <StatusBadge status={status} />
+                        },
+                        {
+                            title: "",
+                            key: "actions",
+                            align: "right",
+                            render: (_, b) => manage && (
+                                <Space size="small">
+                                    {b.status !== "AVAILABLE" && (
+                                        <Tooltip title="Marquer disponible">
+                                            <Button
+                                                type="text"
+                                                size="small"
+                                                style={{ color: "#059669" }}
+                                                icon={<CheckCircleOutlined />}
+                                                onClick={() => handleStatusChange(b, "AVAILABLE")}
+                                            />
+                                        </Tooltip>
                                     )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                                    {b.status !== "MAINTENANCE" && (
+                                        <Tooltip title="Mettre en maintenance">
+                                            <Button
+                                                type="text"
+                                                size="small"
+                                                style={{ color: "#d97706" }}
+                                                icon={<ToolOutlined />}
+                                                onClick={() => handleStatusChange(b, "MAINTENANCE")}
+                                            />
+                                        </Tooltip>
+                                    )}
+                                    {b.status !== "OUT_OF_SERVICE" && (
+                                        <Tooltip title="Mettre hors service">
+                                            <Button
+                                                type="text"
+                                                size="small"
+                                                danger
+                                                icon={<StopOutlined />}
+                                                onClick={() => handleStatusChange(b, "OUT_OF_SERVICE")}
+                                            />
+                                        </Tooltip>
+                                    )}
+                                    <Tooltip title="Modifier">
+                                        <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditForm(b)} />
+                                    </Tooltip>
+                                    <Popconfirm
+                                        title="Supprimer ce bus ?"
+                                        onConfirm={() => handleDelete(b.id)}
+                                        okText="Oui"
+                                        cancelText="Non"
+                                    >
+                                        <Tooltip title="Supprimer">
+                                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                                        </Tooltip>
+                                    </Popconfirm>
+                                </Space>
+                            )
+                        }
+                    ]}
+                    dataSource={buses}
+                />
             </div>
 
             {showForm && (
-                <Modal title="Nouveau bus" onClose={() => setShowForm(false)}>
+                <Modal title={editingId ? "Modifier le bus" : "Nouveau bus"} onClose={() => setShowForm(false)}>
                     <form onSubmit={handleSubmit} className="space-y-3">
 
                         {formError && <div className="text-sm text-red-600">{formError}</div>}
@@ -220,9 +264,10 @@ const BusesPage = () => {
                         <button
                             type="submit"
                             disabled={submitting}
-                            className="w-full bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
                         >
-                            {submitting ? "Création..." : "Créer le bus"}
+                            {submitting && <LoadingOutlined />}
+                            {submitting ? "Enregistrement..." : editingId ? "Enregistrer les modifications" : "Créer le bus"}
                         </button>
                     </form>
                 </Modal>

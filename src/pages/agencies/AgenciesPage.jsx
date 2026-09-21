@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { Table, Button, Tooltip, Popconfirm, Space, message } from "antd";
+import { EditOutlined, DeleteOutlined, LoadingOutlined } from "@ant-design/icons";
 import { agenciesApi, compagniesApi } from "../../api/resources";
 import { useAuth } from "../../context/AuthContext";
 import { can, isSuperAdmin } from "../../permissions";
+import { usePaginatedList } from "../../hooks/usePaginatedList";
 import Modal from "../../components/Modal";
 
 const emptyForm = {
@@ -17,38 +20,37 @@ const AgenciesPage = () => {
     const { user } = useAuth();
     const manage = can("agencies", "manage", user?.role);
 
-    const [agencies, setAgencies] = useState([]);
+    const { data: agencies, loading, error, pagination, reload: load } = usePaginatedList(agenciesApi.list);
     const [compagnies, setCompagnies] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
 
     const [showForm, setShowForm] = useState(false);
+    const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [formError, setFormError] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    const load = async () => {
-        setLoading(true);
-        setError("");
-        try {
-            const res = await agenciesApi.list({ limit: 50 });
-            setAgencies(res.data);
-        } catch (err) {
-            setError(err.response?.data?.message || "Erreur de chargement des agences.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
-        load();
         if (isSuperAdmin(user?.role)) {
-            compagniesApi.list({ limit: 100 }).then((res) => setCompagnies(res.data)).catch(() => {});
+            compagniesApi.list({ limit: 100 }).then((res) => setCompagnies(res.data.filter((c) => c.status === "ACTIVE"))).catch(() => {});
         }
     }, []);
 
     const openForm = () => {
+        setEditingId(null);
         setForm(emptyForm);
+        setFormError("");
+        setShowForm(true);
+    };
+
+    const openEditForm = (agency) => {
+        setEditingId(agency.id);
+        setForm({
+            compagny_id: agency.compagny_id || "",
+            name: agency.name || "",
+            city: agency.city || "",
+            address: agency.address || "",
+            phone: agency.phone || ""
+        });
         setFormError("");
         setShowForm(true);
     };
@@ -58,26 +60,35 @@ const AgenciesPage = () => {
         setFormError("");
         setSubmitting(true);
         try {
-            await agenciesApi.create({
-                ...form,
-                compagny_id: form.compagny_id || undefined
-            });
+            if (editingId) {
+                await agenciesApi.update(editingId, {
+                    ...form,
+                    compagny_id: form.compagny_id || undefined
+                });
+                message.success("Agence mise à jour avec succès.");
+            } else {
+                await agenciesApi.create({
+                    ...form,
+                    compagny_id: form.compagny_id || undefined
+                });
+                message.success("Agence créée avec succès.");
+            }
             setShowForm(false);
             load();
         } catch (err) {
-            setFormError(err.response?.data?.message || "Erreur lors de la création.");
+            setFormError(err.response?.data?.message || "Erreur lors de l'enregistrement.");
         } finally {
             setSubmitting(false);
         }
     };
 
     const handleDelete = async (id) => {
-        if (!confirm("Supprimer cette agence ?")) return;
         try {
             await agenciesApi.remove(id);
+            message.success("Agence supprimée.");
             load();
         } catch (err) {
-            alert(err.response?.data?.message || "Suppression impossible.");
+            message.error(err.response?.data?.message || "Suppression impossible.");
         }
     };
 
@@ -95,40 +106,45 @@ const AgenciesPage = () => {
             {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-left">
-                        <tr>
-                            <th className="px-4 py-2 font-medium">Nom</th>
-                            <th className="px-4 py-2 font-medium">Ville</th>
-                            <th className="px-4 py-2 font-medium">Adresse</th>
-                            <th className="px-4 py-2 font-medium">Téléphone</th>
-                            <th className="px-4 py-2 font-medium"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
-                            <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Chargement...</td></tr>
-                        ) : agencies.length === 0 ? (
-                            <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Aucune agence</td></tr>
-                        ) : agencies.map((a) => (
-                            <tr key={a.id} className="border-t border-slate-100">
-                                <td className="px-4 py-2">{a.name}</td>
-                                <td className="px-4 py-2">{a.city}</td>
-                                <td className="px-4 py-2">{a.address || "-"}</td>
-                                <td className="px-4 py-2">{a.phone || "-"}</td>
-                                <td className="px-4 py-2 text-right">
-                                    {manage && (
-                                        <button onClick={() => handleDelete(a.id)} className="text-xs text-red-600 hover:underline">Supprimer</button>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                <Table
+                    rowKey="id"
+                    loading={loading}
+                    pagination={pagination}
+                    locale={{ emptyText: "Aucune agence" }}
+                    columns={[
+                        { title: "Nom", dataIndex: "name", key: "name" },
+                        { title: "Ville", dataIndex: "city", key: "city" },
+                        { title: "Adresse", key: "address", render: (_, a) => a.address || "-" },
+                        { title: "Téléphone", key: "phone", render: (_, a) => a.phone || "-" },
+                        {
+                            title: "",
+                            key: "actions",
+                            align: "right",
+                            render: (_, a) => manage && (
+                                <Space size="small">
+                                    <Tooltip title="Modifier">
+                                        <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditForm(a)} />
+                                    </Tooltip>
+                                    <Popconfirm
+                                        title="Supprimer cette agence ?"
+                                        onConfirm={() => handleDelete(a.id)}
+                                        okText="Oui"
+                                        cancelText="Non"
+                                    >
+                                        <Tooltip title="Supprimer">
+                                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                                        </Tooltip>
+                                    </Popconfirm>
+                                </Space>
+                            )
+                        }
+                    ]}
+                    dataSource={agencies}
+                />
             </div>
 
             {showForm && (
-                <Modal title="Nouvelle agence" onClose={() => setShowForm(false)}>
+                <Modal title={editingId ? "Modifier l'agence" : "Nouvelle agence"} onClose={() => setShowForm(false)}>
                     <form onSubmit={handleSubmit} className="space-y-3">
 
                         {formError && <div className="text-sm text-red-600">{formError}</div>}
@@ -192,9 +208,10 @@ const AgenciesPage = () => {
                         <button
                             type="submit"
                             disabled={submitting}
-                            className="w-full bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
                         >
-                            {submitting ? "Création..." : "Créer l'agence"}
+                            {submitting && <LoadingOutlined />}
+                            {submitting ? "Enregistrement..." : editingId ? "Enregistrer les modifications" : "Créer l'agence"}
                         </button>
                     </form>
                 </Modal>

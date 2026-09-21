@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { LoadingOutlined } from "@ant-design/icons";
 import { useAuth } from "../../context/AuthContext";
 
 const Login = () => {
@@ -105,8 +106,9 @@ const Login = () => {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full rounded-md bg-slate-900 text-white text-sm font-medium py-2 hover:bg-slate-800 disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 rounded-md bg-slate-900 text-white text-sm font-medium py-2 hover:bg-slate-800 disabled:opacity-60"
                         >
+                            {loading && <LoadingOutlined />}
                             {loading ? "Connexion..." : "Se connecter"}
                         </button>
                     </form>
@@ -127,8 +129,9 @@ const Login = () => {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full rounded-md bg-slate-900 text-white text-sm font-medium py-2 hover:bg-slate-800 disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 rounded-md bg-slate-900 text-white text-sm font-medium py-2 hover:bg-slate-800 disabled:opacity-60"
                         >
+                            {loading && <LoadingOutlined />}
                             {loading ? "Vérification..." : "Valider"}
                         </button>
                         <button

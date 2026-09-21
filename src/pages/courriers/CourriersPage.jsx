@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Table, Button, Tooltip, Popconfirm, Space, message } from "antd";
+import { ArrowRightOutlined, CloseCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { courriersApi, agenciesApi, tripsApi } from "../../api/resources";
 import { useAuth } from "../../context/AuthContext";
 import { can } from "../../permissions";
+import { usePaginatedList } from "../../hooks/usePaginatedList";
 import StatusBadge from "../../components/StatusBadge";
 import Modal from "../../components/Modal";
 
@@ -31,11 +34,9 @@ const CourriersPage = () => {
     const { user } = useAuth();
     const manage = can("courriers", "manage", user?.role);
 
-    const [courriers, setCourriers] = useState([]);
+    const { data: courriers, loading, error, pagination, reload } = usePaginatedList(courriersApi.list);
     const [agencies, setAgencies] = useState([]);
     const [trips, setTrips] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
 
     const [showForm, setShowForm] = useState(false);
     const [form, setForm] = useState(emptyForm);
@@ -46,22 +47,10 @@ const CourriersPage = () => {
     const [trackingResult, setTrackingResult] = useState(null);
     const [trackingError, setTrackingError] = useState("");
 
-    const loadCourriers = async () => {
-        setLoading(true);
-        setError("");
-        try {
-            const res = await courriersApi.list({ limit: 50 });
-            setCourriers(res.data);
-        } catch (err) {
-            setError(err.response?.data?.message || "Erreur de chargement des courriers.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        loadCourriers();
-    }, []);
+    const [deliverCourrier, setDeliverCourrier] = useState(null);
+    const [identityNumber, setIdentityNumber] = useState("");
+    const [deliverError, setDeliverError] = useState("");
+    const [delivering, setDelivering] = useState(false);
 
     const openForm = async () => {
         setForm(emptyForm);
@@ -70,10 +59,10 @@ const CourriersPage = () => {
         try {
             const [agenciesRes, tripsRes] = await Promise.all([
                 agenciesApi.list({ limit: 100 }),
-                tripsApi.list({ limit: 100, status: "SCHEDULED" })
+                tripsApi.list({ limit: 100 })
             ]);
             setAgencies(agenciesRes.data);
-            setTrips(tripsRes.data);
+            setTrips(tripsRes.data.filter((t) => t.status === "SCHEDULED" || t.status === "BOARDING"));
         } catch {
             setAgencies([]);
             setTrips([]);
@@ -92,7 +81,8 @@ const CourriersPage = () => {
                 price: Number(form.price)
             });
             setShowForm(false);
-            loadCourriers();
+            message.success("Courrier enregistré avec succès.");
+            reload();
         } catch (err) {
             setFormError(err.response?.data?.message || "Erreur lors de l'enregistrement.");
         } finally {
@@ -103,21 +93,46 @@ const CourriersPage = () => {
     const handleAdvance = async (courrier) => {
         const status = nextStatus[courrier.status];
         if (!status) return;
+
+        if (status === "DELIVERED") {
+            setDeliverCourrier(courrier);
+            setIdentityNumber("");
+            setDeliverError("");
+            return;
+        }
+
         try {
             await courriersApi.changeStatus(courrier.id, status);
-            loadCourriers();
+            message.success("Statut du courrier mis à jour.");
+            reload();
         } catch (err) {
-            alert(err.response?.data?.message || "Transition impossible.");
+            message.error(err.response?.data?.message || "Transition impossible.");
+        }
+    };
+
+    const handleDeliverSubmit = async (e) => {
+        e.preventDefault();
+        setDeliverError("");
+        setDelivering(true);
+        try {
+            await courriersApi.changeStatus(deliverCourrier.id, "DELIVERED", { receiver_identity_number: identityNumber });
+            message.success("Retrait confirmé avec succès.");
+            setDeliverCourrier(null);
+            reload();
+        } catch (err) {
+            setDeliverError(err.response?.data?.message || "Erreur lors de la confirmation du retrait.");
+        } finally {
+            setDelivering(false);
         }
     };
 
     const handleCancel = async (id) => {
-        if (!confirm("Annuler ce courrier ?")) return;
         try {
             await courriersApi.cancel(id);
-            loadCourriers();
+            message.success("Courrier annulé.");
+            reload();
         } catch (err) {
-            alert(err.response?.data?.message || "Impossible d'annuler.");
+            message.error(err.response?.data?.message || "Impossible d'annuler.");
         }
     };
 
@@ -180,53 +195,73 @@ const CourriersPage = () => {
             {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-left">
-                        <tr>
-                            <th className="px-4 py-2 font-medium">Suivi</th>
-                            <th className="px-4 py-2 font-medium">Expéditeur</th>
-                            <th className="px-4 py-2 font-medium">Destinataire</th>
-                            <th className="px-4 py-2 font-medium">Trajet</th>
-                            <th className="px-4 py-2 font-medium">Statut</th>
-                            <th className="px-4 py-2 font-medium"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
-                            <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Chargement...</td></tr>
-                        ) : courriers.length === 0 ? (
-                            <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Aucun courrier</td></tr>
-                        ) : courriers.map((c) => (
-                            <tr key={c.id} className="border-t border-slate-100">
-                                <td className="px-4 py-2 font-mono text-xs">{c.tracking_number}</td>
-                                <td className="px-4 py-2">{c.sender_name}</td>
-                                <td className="px-4 py-2">{c.receiver_name}</td>
-                                <td className="px-4 py-2">
-                                    {c.departureAgency?.city} → {c.arrivalAgency?.city}
-                                </td>
-                                <td className="px-4 py-2"><StatusBadge status={c.status} /></td>
-                                <td className="px-4 py-2 text-right space-x-2">
-                                    {manage && nextStatus[c.status] && (
-                                        <button
-                                            onClick={() => handleAdvance(c)}
-                                            className="text-xs text-blue-600 hover:underline"
-                                        >
-                                            → {nextStatus[c.status]}
-                                        </button>
+                <Table
+                    rowKey="id"
+                    loading={loading}
+                    pagination={pagination}
+                    locale={{ emptyText: "Aucun courrier" }}
+                    columns={[
+                        {
+                            title: "Suivi",
+                            dataIndex: "tracking_number",
+                            key: "tracking_number",
+                            render: (value) => <span className="font-mono text-xs">{value}</span>
+                        },
+                        {
+                            title: "Expéditeur",
+                            dataIndex: "sender_name",
+                            key: "sender_name"
+                        },
+                        {
+                            title: "Destinataire",
+                            dataIndex: "receiver_name",
+                            key: "receiver_name"
+                        },
+                        {
+                            title: "Trajet",
+                            key: "trajet",
+                            render: (_, c) => `${c.departureAgency?.city} → ${c.arrivalAgency?.city}`
+                        },
+                        {
+                            title: "Statut",
+                            dataIndex: "status",
+                            key: "status",
+                            render: (status) => <StatusBadge status={status} />
+                        },
+                        {
+                            title: "",
+                            key: "actions",
+                            align: "right",
+                            render: (_, c) => manage && (
+                                <Space size="small">
+                                    {nextStatus[c.status] && (
+                                        <Tooltip title={`Passer à ${nextStatus[c.status]}`}>
+                                            <Button
+                                                type="text"
+                                                size="small"
+                                                icon={<ArrowRightOutlined />}
+                                                onClick={() => handleAdvance(c)}
+                                            />
+                                        </Tooltip>
                                     )}
-                                    {manage && ["REGISTERED", "IN_TRANSIT"].includes(c.status) && (
-                                        <button
-                                            onClick={() => handleCancel(c.id)}
-                                            className="text-xs text-red-600 hover:underline"
+                                    {["REGISTERED", "IN_TRANSIT"].includes(c.status) && (
+                                        <Popconfirm
+                                            title="Annuler ce courrier ?"
+                                            onConfirm={() => handleCancel(c.id)}
+                                            okText="Oui"
+                                            cancelText="Non"
                                         >
-                                            Annuler
-                                        </button>
+                                            <Tooltip title="Annuler">
+                                                <Button type="text" size="small" danger icon={<CloseCircleOutlined />} />
+                                            </Tooltip>
+                                        </Popconfirm>
                                     )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                                </Space>
+                            )
+                        }
+                    ]}
+                    dataSource={courriers}
+                />
             </div>
 
             {showForm && (
@@ -387,9 +422,43 @@ const CourriersPage = () => {
                         <button
                             type="submit"
                             disabled={submitting}
-                            className="w-full bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
                         >
+                            {submitting && <LoadingOutlined />}
                             {submitting ? "Enregistrement..." : "Enregistrer le courrier"}
+                        </button>
+                    </form>
+                </Modal>
+            )}
+
+            {deliverCourrier && (
+                <Modal title={`Confirmer le retrait — ${deliverCourrier.tracking_number}`} onClose={() => setDeliverCourrier(null)}>
+                    <form onSubmit={handleDeliverSubmit} className="space-y-3">
+
+                        {deliverError && <div className="text-sm text-red-600">{deliverError}</div>}
+
+                        <p className="text-sm text-slate-600">
+                            Destinataire attendu : <strong>{deliverCourrier.receiver_name}</strong> ({deliverCourrier.receiver_phone})
+                        </p>
+
+                        <div>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">Numéro de pièce d'identité du destinataire</label>
+                            <input
+                                required
+                                value={identityNumber}
+                                onChange={(e) => setIdentityNumber(e.target.value)}
+                                placeholder="Ex: ML0123456"
+                                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                            />
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={delivering}
+                            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
+                        >
+                            {delivering && <LoadingOutlined />}
+                            {delivering ? "Confirmation..." : "Confirmer le retrait"}
                         </button>
                     </form>
                 </Modal>

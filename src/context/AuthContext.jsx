@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import api from "../api/client";
+import api, { refreshAccessToken } from "../api/client";
 
 const AuthContext = createContext(null);
 
@@ -19,17 +19,29 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem("bf_access_token");
-        if (token) {
-            const decoded = decodeToken(token);
+        const init = async () => {
+            const token = localStorage.getItem("bf_access_token");
+            const decoded = token ? decodeToken(token) : null;
+
             if (decoded && decoded.exp * 1000 > Date.now()) {
                 setUser(decoded);
-            } else {
-                localStorage.removeItem("bf_access_token");
-                localStorage.removeItem("bf_refresh_token");
+                setLoading(false);
+                return;
             }
-        }
-        setLoading(false);
+
+            // Token absent ou expiré : on tente un rafraîchissement silencieux
+            // via le cookie httpOnly avant de considérer l'utilisateur déconnecté.
+            try {
+                const newToken = await refreshAccessToken();
+                setUser(decodeToken(newToken));
+            } catch {
+                localStorage.removeItem("bf_access_token");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        init();
     }, []);
 
     const requestOtp = async (email, password) => {
@@ -44,10 +56,9 @@ export const AuthProvider = ({ children }) => {
 
     const verifyOtp = async (user_id, code) => {
         const response = await api.post("/auth/verify-otp", { user_id, code });
-        const { accessToken, refreshToken } = response.data;
+        const { accessToken } = response.data;
 
         localStorage.setItem("bf_access_token", accessToken);
-        localStorage.setItem("bf_refresh_token", refreshToken);
 
         const decoded = decodeToken(accessToken);
         setUser(decoded);
@@ -56,16 +67,12 @@ export const AuthProvider = ({ children }) => {
     };
 
     const logout = async () => {
-        const refreshToken = localStorage.getItem("bf_refresh_token");
         try {
-            if (refreshToken) {
-                await api.post("/auth/logout", { refreshToken });
-            }
+            await api.post("/auth/logout");
         } catch {
             // on ignore une erreur de logout côté serveur
         }
         localStorage.removeItem("bf_access_token");
-        localStorage.removeItem("bf_refresh_token");
         setUser(null);
     };
 

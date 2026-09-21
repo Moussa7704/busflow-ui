@@ -1,5 +1,8 @@
 // Miroir des listes authorize(...) du backend (routes/*.js) pour chaque module.
 export const modules = {
+    dashboard: {
+        view: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN"]
+    },
     trips: {
         view: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN"],
         manage: ["SUPER_ADMIN", "COMPAGNY_ADMIN"]
@@ -13,9 +16,12 @@ export const modules = {
         scan: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "CONTROLLER"],
         manage: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "AGENT"]
     },
+    embarquement: {
+        view: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "CONTROLLER"]
+    },
     courriers: {
-        view: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "AGENT"],
-        manage: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "AGENT"],
+        view: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "AGENT", "COURRIER"],
+        manage: ["SUPER_ADMIN", "COMPAGNY_ADMIN", "AGENCY_ADMIN", "AGENT", "COURRIER"],
         delete: ["SUPER_ADMIN", "COMPAGNY_ADMIN"]
     },
     buses: {

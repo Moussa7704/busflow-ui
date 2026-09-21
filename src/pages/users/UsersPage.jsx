@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { Table, Button, Tooltip, Popconfirm, Space, message } from "antd";
+import { CheckCircleOutlined, StopOutlined, EditOutlined, DeleteOutlined, LoadingOutlined } from "@ant-design/icons";
 import { usersApi, rolesApi, agenciesApi, compagniesApi } from "../../api/resources";
 import { useAuth } from "../../context/AuthContext";
 import { can, isSuperAdmin } from "../../permissions";
-import StatusBadge from "../../components/StatusBadge";
+import { usePaginatedList } from "../../hooks/usePaginatedList";
 import Modal from "../../components/Modal";
 
 const emptyForm = {
@@ -21,40 +23,53 @@ const UsersPage = () => {
     const { user } = useAuth();
     const manage = can("users", "manage", user?.role);
 
-    const [users, setUsers] = useState([]);
+    const { data: users, loading, error, pagination, reload: load } = usePaginatedList(usersApi.list);
     const [roles, setRoles] = useState([]);
     const [agencies, setAgencies] = useState([]);
     const [compagnies, setCompagnies] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
 
     const [showForm, setShowForm] = useState(false);
+    const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [formError, setFormError] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    const load = async () => {
-        setLoading(true);
-        setError("");
-        try {
-            const res = await usersApi.list({ limit: 50 });
-            setUsers(res.data);
-        } catch (err) {
-            setError(err.response?.data?.message || "Erreur de chargement des utilisateurs.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
-        load();
         if (isSuperAdmin(user?.role)) {
-            compagniesApi.list({ limit: 100 }).then((res) => setCompagnies(res.data)).catch(() => {});
+            compagniesApi.list({ limit: 100 }).then((res) => setCompagnies(res.data.filter((c) => c.status === "ACTIVE"))).catch(() => {});
         }
     }, []);
 
     const openForm = async () => {
+        setEditingId(null);
         setForm(emptyForm);
+        setFormError("");
+        setShowForm(true);
+        try {
+            const [rolesRes, agenciesRes] = await Promise.all([
+                rolesApi.list(),
+                agenciesApi.list({ limit: 100 })
+            ]);
+            setRoles(rolesRes.data);
+            setAgencies(agenciesRes.data);
+        } catch {
+            setRoles([]);
+            setAgencies([]);
+        }
+    };
+
+    const openEditForm = async (u) => {
+        setEditingId(u.id);
+        setForm({
+            compagny_id: u.compagny_id || "",
+            agency_id: u.agency_id || "",
+            role_id: u.role_id || "",
+            first_name: u.first_name || "",
+            last_name: u.last_name || "",
+            phone: u.phone || "",
+            email: u.email || "",
+            password: ""
+        });
         setFormError("");
         setShowForm(true);
         try {
@@ -75,15 +90,23 @@ const UsersPage = () => {
         setFormError("");
         setSubmitting(true);
         try {
-            await usersApi.create({
+            const payload = {
                 ...form,
                 compagny_id: form.compagny_id || undefined,
                 agency_id: form.agency_id || undefined
-            });
+            };
+            if (editingId) {
+                if (!payload.password) delete payload.password;
+                await usersApi.update(editingId, payload);
+                message.success("Utilisateur mis à jour avec succès.");
+            } else {
+                await usersApi.create(payload);
+                message.success("Utilisateur créé avec succès.");
+            }
             setShowForm(false);
             load();
         } catch (err) {
-            setFormError(err.response?.data?.message || "Erreur lors de la création.");
+            setFormError(err.response?.data?.message || "Erreur lors de l'enregistrement.");
         } finally {
             setSubmitting(false);
         }
@@ -92,19 +115,20 @@ const UsersPage = () => {
     const handleToggleStatus = async (id) => {
         try {
             await usersApi.changeStatus(id);
+            message.success("Statut de l'utilisateur mis à jour.");
             load();
         } catch (err) {
-            alert(err.response?.data?.message || "Action impossible.");
+            message.error(err.response?.data?.message || "Action impossible.");
         }
     };
 
     const handleDelete = async (id) => {
-        if (!confirm("Supprimer cet utilisateur ?")) return;
         try {
             await usersApi.remove(id);
+            message.success("Utilisateur supprimé.");
             load();
         } catch (err) {
-            alert(err.response?.data?.message || "Suppression impossible.");
+            message.error(err.response?.data?.message || "Suppression impossible.");
         }
     };
 
@@ -122,53 +146,64 @@ const UsersPage = () => {
             {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-left">
-                        <tr>
-                            <th className="px-4 py-2 font-medium">Nom</th>
-                            <th className="px-4 py-2 font-medium">Email</th>
-                            <th className="px-4 py-2 font-medium">Téléphone</th>
-                            <th className="px-4 py-2 font-medium">Rôle</th>
-                            <th className="px-4 py-2 font-medium">Agence</th>
-                            <th className="px-4 py-2 font-medium">Statut</th>
-                            <th className="px-4 py-2 font-medium"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {loading ? (
-                            <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Chargement...</td></tr>
-                        ) : users.length === 0 ? (
-                            <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Aucun utilisateur</td></tr>
-                        ) : users.map((u) => (
-                            <tr key={u.id} className="border-t border-slate-100">
-                                <td className="px-4 py-2">{u.first_name} {u.last_name}</td>
-                                <td className="px-4 py-2">{u.email}</td>
-                                <td className="px-4 py-2">{u.phone}</td>
-                                <td className="px-4 py-2">{u.Role?.name || "-"}</td>
-                                <td className="px-4 py-2">{u.Agency?.name || "-"}</td>
-                                <td className="px-4 py-2">
-                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
-                                        {u.is_active ? "ACTIF" : "INACTIF"}
-                                    </span>
-                                </td>
-                                <td className="px-4 py-2 text-right space-x-2">
-                                    {manage && (
-                                        <>
-                                            <button onClick={() => handleToggleStatus(u.id)} className="text-xs text-blue-600 hover:underline">
-                                                {u.is_active ? "Désactiver" : "Activer"}
-                                            </button>
-                                            <button onClick={() => handleDelete(u.id)} className="text-xs text-red-600 hover:underline">Supprimer</button>
-                                        </>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                <Table
+                    rowKey="id"
+                    loading={loading}
+                    pagination={pagination}
+                    locale={{ emptyText: "Aucun utilisateur" }}
+                    columns={[
+                        { title: "Nom", key: "name", render: (_, u) => `${u.first_name} ${u.last_name}` },
+                        { title: "Email", dataIndex: "email", key: "email" },
+                        { title: "Téléphone", dataIndex: "phone", key: "phone" },
+                        { title: "Rôle", key: "role", render: (_, u) => u.Role?.name || "-" },
+                        { title: "Agence", key: "agency", render: (_, u) => u.Agency?.name || "-" },
+                        {
+                            title: "Statut",
+                            key: "is_active",
+                            render: (_, u) => (
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
+                                    {u.is_active ? "ACTIF" : "INACTIF"}
+                                </span>
+                            )
+                        },
+                        {
+                            title: "",
+                            key: "actions",
+                            align: "right",
+                            render: (_, u) => manage && (
+                                <Space size="small">
+                                    <Tooltip title={u.is_active ? "Désactiver" : "Activer"}>
+                                        <Button
+                                            type="text"
+                                            size="small"
+                                            style={u.is_active ? undefined : { color: "#059669" }}
+                                            icon={u.is_active ? <StopOutlined /> : <CheckCircleOutlined />}
+                                            onClick={() => handleToggleStatus(u.id)}
+                                        />
+                                    </Tooltip>
+                                    <Tooltip title="Modifier">
+                                        <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEditForm(u)} />
+                                    </Tooltip>
+                                    <Popconfirm
+                                        title="Supprimer cet utilisateur ?"
+                                        onConfirm={() => handleDelete(u.id)}
+                                        okText="Oui"
+                                        cancelText="Non"
+                                    >
+                                        <Tooltip title="Supprimer">
+                                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                                        </Tooltip>
+                                    </Popconfirm>
+                                </Space>
+                            )
+                        }
+                    ]}
+                    dataSource={users}
+                />
             </div>
 
             {showForm && (
-                <Modal title="Nouvel utilisateur" onClose={() => setShowForm(false)}>
+                <Modal title={editingId ? "Modifier l'utilisateur" : "Nouvel utilisateur"} onClose={() => setShowForm(false)}>
                     <form onSubmit={handleSubmit} className="space-y-3">
 
                         {formError && <div className="text-sm text-red-600">{formError}</div>}
@@ -234,10 +269,12 @@ const UsersPage = () => {
                         </div>
 
                         <div>
-                            <label className="block text-xs font-medium text-slate-600 mb-1">Mot de passe</label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                                Mot de passe {editingId && "(laisser vide pour ne pas changer)"}
+                            </label>
                             <input
                                 type="password"
-                                required
+                                required={!editingId}
                                 value={form.password}
                                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
@@ -277,9 +314,10 @@ const UsersPage = () => {
                         <button
                             type="submit"
                             disabled={submitting}
-                            className="w-full bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
+                            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-medium py-2 rounded-md hover:bg-slate-800 disabled:opacity-60"
                         >
-                            {submitting ? "Création..." : "Créer l'utilisateur"}
+                            {submitting && <LoadingOutlined />}
+                            {submitting ? "Enregistrement..." : editingId ? "Enregistrer les modifications" : "Créer l'utilisateur"}
                         </button>
                     </form>
                 </Modal>

@@ -3,7 +3,8 @@ import axios from "axios";
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api/v1";
 
 const api = axios.create({
-    baseURL: BASE_URL
+    baseURL: BASE_URL,
+    withCredentials: true
 });
 
 api.interceptors.request.use((config) => {
@@ -16,14 +17,8 @@ api.interceptors.request.use((config) => {
 
 let refreshPromise = null;
 
-const refreshAccessToken = async () => {
-    const refreshToken = localStorage.getItem("bf_refresh_token");
-
-    if (!refreshToken) {
-        throw new Error("No refresh token");
-    }
-
-    const response = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
+export const refreshAccessToken = async () => {
+    const response = await axios.post(`${BASE_URL}/auth/refresh`, {}, { withCredentials: true });
 
     localStorage.setItem("bf_access_token", response.data.accessToken);
 
